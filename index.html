@@ -1,0 +1,864 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SYS/PERF — Diagnóstico Operacional</title>
+<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Rajdhani:wght@300;400;600;700&family=Oxanium:wght@200;400;700;800&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+<style>
+:root {
+  --bg:        #020408;
+  --surface:   #060d18;
+  --panel:     #091524;
+  --border:    #0d2137;
+  --accent:    #00d4ff;
+  --accent2:   #00ff9d;
+  --warn:      #ffb800;
+  --danger:    #ff3d5a;
+  --text:      #c8e0f0;
+  --muted:     #3a5a72;
+  --glow:      0 0 18px rgba(0,212,255,0.35);
+}
+
+*, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
+html { scroll-behavior: smooth; }
+
+body {
+  background: var(--bg);
+  font-family: 'Rajdhani', sans-serif;
+  color: var(--text);
+  min-height: 100vh;
+  overflow-x: hidden;
+  cursor: crosshair;
+}
+
+body::before {
+  content:'';
+  position:fixed; inset:0; z-index:0; pointer-events:none;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.04'/%3E%3C/svg%3E");
+  background-size: 180px;
+  opacity: 0.5;
+}
+
+body::after {
+  content:'';
+  position:fixed; inset:0; z-index:1; pointer-events:none;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 2px,
+    rgba(0,0,0,0.08) 2px,
+    rgba(0,0,0,0.08) 4px
+  );
+}
+
+.grid-bg {
+  position:fixed; inset:0; z-index:0; pointer-events:none;
+  background-image:
+    linear-gradient(rgba(0,212,255,0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0,212,255,0.03) 1px, transparent 1px);
+  background-size: 40px 40px;
+}
+
+header {
+  position: relative; z-index:10;
+  display:flex; align-items:center; justify-content:space-between;
+  padding: 18px 40px;
+  border-bottom: 1px solid var(--border);
+  background: linear-gradient(180deg, rgba(6,13,24,0.98) 0%, rgba(6,13,24,0.8) 100%);
+  backdrop-filter: blur(20px);
+}
+
+.logo-wrap { display:flex; align-items:center; gap:14px; }
+
+.logo-icon {
+  width:36px; height:36px;
+  border: 1.5px solid var(--accent);
+  display:flex; align-items:center; justify-content:center;
+  font-size:16px;
+  box-shadow: var(--glow), inset 0 0 10px rgba(0,212,255,0.1);
+  animation: pulse-border 3s ease-in-out infinite;
+}
+
+@keyframes pulse-border {
+  0%,100%{ box-shadow: var(--glow), inset 0 0 10px rgba(0,212,255,0.1); }
+  50%    { box-shadow: 0 0 30px rgba(0,212,255,0.6), inset 0 0 18px rgba(0,212,255,0.2); }
+}
+
+.logo-text { font-family:'Oxanium', monospace; font-size:20px; font-weight:800; letter-spacing:3px; color:var(--accent); }
+.logo-sub  { font-family:'Share Tech Mono', monospace; font-size:10px; color:var(--muted); letter-spacing:2px; margin-top:2px; }
+
+.header-right {
+  display:flex; gap:20px; align-items:center;
+  font-family:'Share Tech Mono', monospace; font-size:11px; color:var(--muted);
+}
+
+.live-dot {
+  width:7px; height:7px; border-radius:50%;
+  background:var(--accent2);
+  box-shadow: 0 0 8px var(--accent2);
+  animation: blink 1.4s step-end infinite;
+}
+
+@keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.1} }
+
+.container {
+  position: relative; z-index:5;
+  max-width: 1280px; margin: 0 auto;
+  padding: 36px 40px;
+}
+
+.upload-zone {
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--panel);
+  padding: 40px;
+  text-align: center;
+  margin-bottom: 36px;
+  position: relative;
+  overflow: hidden;
+  transition: border-color 0.3s, background 0.3s;
+}
+
+.upload-zone::before {
+  content:'';
+  position:absolute; top:0; left:-100%;
+  width:100%; height:1px;
+  background: linear-gradient(90deg, transparent, var(--accent), transparent);
+  animation: scan 4s linear infinite;
+}
+
+@keyframes scan {
+  0%   { left:-100%; }
+  100% { left: 200%; }
+}
+
+.upload-zone:hover {
+  border-color: var(--accent);
+  background: rgba(0,212,255,0.03);
+}
+
+.upload-zone label {
+  cursor: pointer;
+  display: inline-flex; align-items:center; gap:10px;
+  background: transparent;
+  border: 1px solid var(--accent);
+  color: var(--accent);
+  font-family:'Oxanium', monospace;
+  font-size: 13px; font-weight:700;
+  letter-spacing: 2px;
+  padding: 12px 28px;
+  border-radius: 2px;
+  transition: all 0.25s;
+  position: relative;
+  overflow: hidden;
+}
+
+.upload-zone label::before {
+  content:'';
+  position:absolute; inset:0;
+  background: var(--accent);
+  transform: translateX(-100%);
+  transition: transform 0.3s;
+  z-index:-1;
+}
+
+.upload-zone label:hover { color: var(--bg); }
+.upload-zone label:hover::before { transform:translateX(0); }
+
+input[type=file] { display:none; }
+
+.upload-hint {
+  margin-top: 14px;
+  font-family:'Share Tech Mono', monospace;
+  font-size: 11px; color:var(--muted);
+  letter-spacing:1.5px;
+}
+
+.score-banner {
+  display:none;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  border-radius: 4px;
+  padding: 28px 36px;
+  margin-bottom: 32px;
+  position: relative;
+  overflow: hidden;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+}
+
+.score-banner.visible { display:flex; animation: fadeUp 0.6s ease both; }
+
+@keyframes fadeUp {
+  from { opacity:0; transform:translateY(20px); }
+  to   { opacity:1; transform:translateY(0); }
+}
+
+.score-label-block { flex:1; }
+.score-eyebrow {
+  font-family:'Share Tech Mono', monospace;
+  font-size:10px; color:var(--muted); letter-spacing:3px; text-transform:uppercase;
+  margin-bottom:6px;
+}
+
+.score-title {
+  font-family:'Oxanium', monospace;
+  font-size:40px; font-weight:800; line-height:1;
+  margin-bottom:8px;
+}
+
+.score-sub {
+  font-size:13px; color:var(--muted); letter-spacing:1px;
+}
+
+.score-ring { position:relative; width:120px; height:120px; flex-shrink:0; }
+.score-ring canvas { width:100%; height:100%; }
+.score-ring-val {
+  position:absolute; inset:0;
+  display:flex; align-items:center; justify-content:center;
+  font-family:'Oxanium', monospace; font-size:26px; font-weight:800;
+}
+
+.score-insights { flex:1; border-left:1px solid var(--border); padding-left:28px; }
+.insight-item {
+  display:flex; align-items:flex-start; gap:10px;
+  font-size:13px; color:var(--text); line-height:1.5;
+  margin-bottom:10px;
+}
+.insight-dot { width:6px; height:6px; border-radius:50%; margin-top:6px; flex-shrink:0; }
+
+.kpi-grid {
+  display:grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap:16px;
+  margin-bottom:32px;
+}
+
+@media(max-width:900px){ .kpi-grid{ grid-template-columns:repeat(2,1fr); } }
+@media(max-width:500px){ .kpi-grid{ grid-template-columns:1fr; } }
+
+.kpi-card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 22px 24px;
+  position: relative;
+  overflow: hidden;
+  opacity:0;
+  transition: border-color 0.3s, transform 0.3s;
+  min-height: 190px;
+}
+
+.kpi-card.loaded { opacity:1; animation: fadeUp 0.5s ease both; }
+.kpi-card:hover { transform:translateY(-4px); border-color:var(--accent); }
+
+.kpi-card::after {
+  content:'';
+  position:absolute; top:0; left:0; right:0;
+  height:2px;
+}
+
+.kpi-card.ok::after { background:var(--accent2); }
+.kpi-card.warn::after { background:var(--warn); }
+.kpi-card.bad::after { background:var(--danger); }
+.kpi-card.neutral::after { background:var(--accent); }
+
+.kpi-top { display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; }
+.kpi-label { font-family:'Share Tech Mono', monospace; font-size:10px; letter-spacing:2px; color:var(--muted); text-transform:uppercase; }
+.kpi-icon  { font-size:18px; opacity:0.6; }
+
+.kpi-value {
+  font-family:'Oxanium', monospace;
+  font-size:48px; font-weight:800; line-height:1;
+  margin-bottom:6px;
+}
+
+.kpi-card.ok .kpi-value { color:var(--accent2); }
+.kpi-card.warn .kpi-value { color:var(--warn); }
+.kpi-card.bad .kpi-value { color:var(--danger); }
+.kpi-card.neutral .kpi-value { color:var(--accent); }
+
+.kpi-bar-wrap {
+  height:3px; background:var(--border);
+  border-radius:99px; margin:12px 0 10px;
+  overflow:hidden;
+}
+
+.kpi-bar {
+  height:100%; width:0%;
+  border-radius:99px;
+  transition: width 1.2s cubic-bezier(.22,1,.36,1);
+}
+
+.kpi-card.ok .kpi-bar { background:var(--accent2); }
+.kpi-card.warn .kpi-bar { background:var(--warn); }
+.kpi-card.bad .kpi-bar { background:var(--danger); }
+.kpi-card.neutral .kpi-bar { background:var(--accent); }
+
+.kpi-status {
+  font-size:11px; font-family:'Share Tech Mono', monospace; letter-spacing:1.5px;
+}
+
+.kpi-card.ok .kpi-status { color:var(--accent2); }
+.kpi-card.warn .kpi-status { color:var(--warn); }
+.kpi-card.bad .kpi-status { color:var(--danger); }
+
+.info-list {
+  display:flex;
+  flex-direction:column;
+  gap:10px;
+  margin-top:6px;
+}
+
+.info-row {
+  display:flex;
+  justify-content:space-between;
+  gap:12px;
+  padding:8px 0;
+  border-bottom:1px solid rgba(13,33,55,0.7);
+  font-size:13px;
+}
+
+.info-row:last-child { border-bottom:none; }
+.info-key {
+  color:var(--muted);
+  font-family:'Share Tech Mono', monospace;
+  font-size:10px;
+  letter-spacing:1.5px;
+  text-transform:uppercase;
+}
+.info-val {
+  color:var(--text);
+  font-weight:600;
+  text-align:right;
+  word-break:break-word;
+}
+
+.bottom-grid {
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:16px;
+  display:none;
+}
+.bottom-grid.visible { display:grid; animation: fadeUp 0.7s ease both; }
+
+@media(max-width:800px){ .bottom-grid{ grid-template-columns:1fr; } }
+
+.panel {
+  background:var(--panel);
+  border:1px solid var(--border);
+  border-radius:4px;
+  padding:24px;
+}
+
+.panel-title {
+  font-family:'Share Tech Mono', monospace;
+  font-size:10px; letter-spacing:3px; color:var(--muted);
+  text-transform:uppercase; margin-bottom:20px;
+  display:flex; align-items:center; gap:10px;
+}
+
+.panel-title::before {
+  content:'';
+  width:20px; height:1px; background:var(--accent);
+}
+
+.radar-wrap { position:relative; height:260px; }
+
+.breakdown-list { display:flex; flex-direction:column; gap:14px; }
+.breakdown-item { display:flex; flex-direction:column; gap:6px; }
+.breakdown-top  { display:flex; justify-content:space-between; align-items:center; }
+.breakdown-name { font-size:13px; font-weight:600; letter-spacing:1px; color:var(--text); }
+.breakdown-val  { font-family:'Oxanium', monospace; font-size:14px; font-weight:700; }
+.breakdown-track { height:4px; background:var(--border); border-radius:99px; overflow:hidden; }
+.breakdown-fill  { height:100%; border-radius:99px; width:0%; transition: width 1.4s cubic-bezier(.22,1,.36,1); }
+
+.insights-list { display:flex; flex-direction:column; gap:12px; }
+
+.insight-row {
+  display:flex; gap:12px; align-items:flex-start;
+  padding:12px 14px;
+  background:rgba(0,0,0,0.3);
+  border:1px solid var(--border);
+  border-radius:3px;
+  font-size:13px; line-height:1.5;
+  border-left-width:3px;
+}
+
+.insight-row.ok   { border-left-color:var(--accent2); }
+.insight-row.warn { border-left-color:var(--warn); }
+.insight-row.bad  { border-left-color:var(--danger); }
+.insight-row.info { border-left-color:var(--accent); }
+
+.insight-row .tag {
+  font-family:'Share Tech Mono', monospace; font-size:9px;
+  letter-spacing:1.5px; text-transform:uppercase;
+  padding:2px 8px; border-radius:2px; flex-shrink:0; margin-top:2px;
+}
+
+.insight-row.ok .tag   { background:rgba(0,255,157,0.15); color:var(--accent2); }
+.insight-row.warn .tag { background:rgba(255,184,0,0.15); color:var(--warn); }
+.insight-row.bad .tag  { background:rgba(255,61,90,0.15); color:var(--danger); }
+.insight-row.info .tag { background:rgba(0,212,255,0.15); color:var(--accent); }
+
+footer {
+  position:relative; z-index:5;
+  display:flex; align-items:center; justify-content:space-between;
+  padding:16px 40px;
+  border-top:1px solid var(--border);
+  font-family:'Share Tech Mono', monospace; font-size:10px; color:var(--muted);
+  letter-spacing:1.5px;
+  margin-top:48px;
+  gap:10px;
+  flex-wrap:wrap;
+}
+
+.btn {
+  background:transparent;
+  border:1px solid var(--accent);
+  color:var(--accent);
+  font-family:'Oxanium', monospace; font-weight:700;
+  font-size:12px; letter-spacing:2px;
+  padding:10px 24px; border-radius:2px;
+  cursor:pointer;
+  transition: all 0.25s;
+  position:relative; overflow:hidden;
+}
+
+.btn::before {
+  content:'';
+  position:absolute; inset:0;
+  background:var(--accent);
+  transform:translateX(-100%);
+  transition:transform 0.3s;
+  z-index:-1;
+}
+
+.btn:hover { color:var(--bg); }
+.btn:hover::before { transform:translateX(0); }
+</style>
+</head>
+<body>
+
+<div class="grid-bg"></div>
+
+<header>
+  <div class="logo-wrap">
+    <div class="logo-icon">⚡</div>
+    <div>
+      <div class="logo-text">SYS/PERF</div>
+      <div class="logo-sub">ANÁLISE DE RESPOSTA AO STRESS</div>
+    </div>
+  </div>
+  <div class="header-right">
+    <div class="live-dot"></div>
+    <span id="hdr-time">--:--:--</span>
+    &nbsp;|&nbsp; BUILD 7.0.0 &nbsp;|&nbsp; XML READY
+  </div>
+</header>
+
+<div class="container">
+
+  <div class="upload-zone">
+    <label for="file">⬆ CARREGAR XML</label>
+    <input type="file" id="file" accept=".xml">
+    <div class="upload-hint">PADRÃO: SISTEMA / HOSTNAME / USUARIO / CPU_USO / MEMORIA_USO / DISCO_USO / DATA</div>
+  </div>
+
+  <div class="score-banner" id="scoreBanner">
+    <div class="score-label-block">
+      <div class="score-eyebrow">AVALIAÇÃO GERAL DA MÁQUINA</div>
+      <div class="score-title" id="scoreTitle">—</div>
+      <div class="score-sub" id="scoreSub">Leitura baseada em como a máquina reagiu ao stress aplicado</div>
+    </div>
+    <div class="score-ring">
+      <canvas id="ringChart"></canvas>
+      <div class="score-ring-val" id="ringVal">—</div>
+    </div>
+    <div class="score-insights">
+      <div class="score-eyebrow" style="margin-bottom:12px">LEITURA RÁPIDA</div>
+      <div id="quickInsights"></div>
+    </div>
+  </div>
+
+  <div class="kpi-grid">
+    <div class="kpi-card neutral" id="card-cpu"></div>
+    <div class="kpi-card neutral" id="card-mem"></div>
+    <div class="kpi-card neutral" id="card-disk"></div>
+    <div class="kpi-card neutral loaded" id="card-info"></div>
+  </div>
+
+  <div class="bottom-grid" id="bottomGrid">
+    <div class="panel">
+      <div class="panel-title">RADAR DE CARGA</div>
+      <div class="radar-wrap">
+        <canvas id="radarChart"></canvas>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-title">DETALHAMENTO</div>
+      <div class="breakdown-list" id="breakdownList"></div>
+    </div>
+
+    <div class="panel" style="grid-column:1/-1">
+      <div class="panel-title">INSIGHTS & RECOMENDAÇÕES</div>
+      <div class="insights-list" id="insightsList"></div>
+    </div>
+  </div>
+
+</div>
+
+<footer>
+  <span>SYS/PERF · DIAGNÓSTICO XML · v7.0.0</span>
+  <button class="btn" onclick="window.print()">⬇ EXPORTAR PDF</button>
+  <span id="ft-status">AGUARDANDO ARQUIVO...</span>
+</footer>
+
+<script>
+function tick(){
+  const d = new Date();
+  document.getElementById('hdr-time').textContent = d.toTimeString().slice(0,8);
+}
+tick();
+setInterval(tick, 1000);
+
+function escapeHtml(str){
+  return String(str ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
+function usageStatusText(value){
+  if(value < 50) return '▲ BAIXO';
+  if(value < 70) return '◆ MODERADO';
+  if(value < 85) return '▶ ELEVADO';
+  return '▼ ALTO';
+}
+
+function colorFor(c){
+  const styles = getComputedStyle(document.documentElement);
+  if(c === 'ok') return styles.getPropertyValue('--accent2').trim();
+  if(c === 'warn') return styles.getPropertyValue('--warn').trim();
+  return styles.getPropertyValue('--danger').trim();
+}
+
+function cpuResponseClass(cpu, mem, disk){
+  if (cpu >= 80 && mem < 75 && disk < 75) return 'ok';
+  if (cpu >= 85 && (mem >= 75 || disk >= 75)) return 'warn';
+  if (cpu < 80) return 'ok';
+  return 'bad';
+}
+
+function memoryResponseClass(mem){
+  if (mem < 75) return 'ok';
+  if (mem < 90) return 'warn';
+  return 'bad';
+}
+
+function diskResponseClass(disk){
+  if (disk < 75) return 'ok';
+  if (disk < 90) return 'warn';
+  return 'bad';
+}
+
+function getOverallResponse(cpu, mem, disk){
+  const criticalCount = [cpu, mem, disk].filter(v => v >= 85).length;
+
+  if (cpu >= 80 && mem < 75 && disk < 75) {
+    return {
+      level: 'ok',
+      title: 'RESPONDEU BEM AO TESTE',
+      summary: 'A máquina foi pressionada e manteve boa estabilidade operacional.'
+    };
+  }
+
+  if (criticalCount >= 2 || mem >= 90 || disk >= 90) {
+    return {
+      level: 'bad',
+      title: 'MÁQUINA SENTIU O TESTE',
+      summary: 'Há indícios de limitação real sob carga, com pressão elevada em múltiplos recursos.'
+    };
+  }
+
+  return {
+    level: 'warn',
+    title: 'RESPOSTA INTERMEDIÁRIA',
+    summary: 'A máquina suportou o teste, mas com sinais de atenção em parte dos recursos.'
+  };
+}
+
+function buildAssessment(cpu, mem, disk){
+  const overall = getOverallResponse(cpu, mem, disk);
+
+  let health = 80;
+  if (overall.level === 'ok') health = 82;
+  if (overall.level === 'warn') health = 58;
+  if (overall.level === 'bad') health = 28;
+
+  const quick = [];
+  const insights = [];
+
+  if (overall.level === 'ok') {
+    quick.push({ type:'ok', text:`CPU alta (${cpu.toFixed(0)}%) durante stress é compatível com teste bem aplicado.` });
+    quick.push({ type:'ok', text:`Memória (${mem.toFixed(0)}%) e disco (${disk.toFixed(0)}%) ficaram em faixas confortáveis.` });
+    insights.push({ type:'ok', tag:'RESULTADO', text:'A máquina respondeu bem ao teste. O esforço foi absorvido sem indício forte de colapso em memória ou disco.' });
+  } else if (overall.level === 'warn') {
+    quick.push({ type:'warn', text:'A máquina suportou o teste, mas parte dos recursos operou com menor folga.' });
+    quick.push({ type:'warn', text:`CPU ${cpu.toFixed(0)}%, memória ${mem.toFixed(0)}% e disco ${disk.toFixed(0)}% pedem acompanhamento.` });
+    insights.push({ type:'warn', tag:'RESULTADO', text:'Há sinal intermediário. Não é um cenário claramente ruim, mas vale acompanhar o comportamento em uso real.' });
+  } else {
+    quick.push({ type:'bad', text:'Múltiplos recursos ficaram altos durante o teste.' });
+    quick.push({ type:'bad', text:'Esse padrão se aproxima mais de limitação operacional real.' });
+    insights.push({ type:'bad', tag:'RESULTADO', text:'A máquina sentiu o stress. Há evidência mais consistente de limitação sob carga.' });
+  }
+
+  if (cpuResponseClass(cpu, mem, disk) === 'ok') {
+    insights.push({ type:'ok', tag:'CPU', text:'A CPU foi exigida de forma coerente e o restante do sistema manteve estabilidade.' });
+  } else if (cpuResponseClass(cpu, mem, disk) === 'warn') {
+    insights.push({ type:'warn', tag:'CPU', text:'A CPU trabalhou em faixa alta junto com pressão adicional em outro recurso. Vale observar multitarefa e carga real do usuário.' });
+  } else {
+    insights.push({ type:'bad', tag:'CPU', text:'A CPU ficou em condição desfavorável no contexto do teste, sugerindo pouca folga operacional.' });
+  }
+
+  if (memoryResponseClass(mem) === 'ok') {
+    insights.push({ type:'ok', tag:'RAM', text:'A memória ficou em boa faixa de operação durante o stress.' });
+  } else if (memoryResponseClass(mem) === 'warn') {
+    insights.push({ type:'warn', tag:'RAM', text:'A memória subiu para uma faixa de atenção. Isso pode afetar a máquina com muitas aplicações abertas.' });
+  } else {
+    insights.push({ type:'bad', tag:'RAM', text:'A memória ficou muito alta. Esse é um dos sinais mais fortes de limitação em uso real.' });
+  }
+
+  if (diskResponseClass(disk) === 'ok') {
+    insights.push({ type:'ok', tag:'DISCO', text:'O disco permaneceu em faixa confortável durante o teste.' });
+  } else if (diskResponseClass(disk) === 'warn') {
+    insights.push({ type:'warn', tag:'DISCO', text:'O disco operou em faixa elevada. Vale revisar espaço livre e desempenho do armazenamento.' });
+  } else {
+    insights.push({ type:'bad', tag:'DISCO', text:'O disco ficou em faixa crítica. Isso tende a impactar resposta do sistema, abertura de programas e login.' });
+  }
+
+  return { ...overall, health, quick, insights };
+}
+
+let ringInstance = null;
+let radarInstance = null;
+
+document.getElementById('file').addEventListener('change', function(e){
+  const file = e.target.files[0];
+  if(!file) return;
+
+  const reader = new FileReader();
+  reader.onload = function(){
+    const xml = new DOMParser().parseFromString(reader.result, 'text/xml');
+
+    function getText(tag){
+      return xml.getElementsByTagName(tag)[0]?.textContent?.trim() || 'N/D';
+    }
+
+    function getNum(tag){
+      const v = parseFloat(getText(tag).replace(',', '.'));
+      return isNaN(v) ? 0 : v;
+    }
+
+    const payload = {
+      sistema: getText('sistema'),
+      hostname: getText('hostname'),
+      usuario: getText('usuario'),
+      data: getText('data'),
+      cpu: getNum('cpu_uso'),
+      mem: getNum('memoria_uso'),
+      disk: getNum('disco_uso')
+    };
+
+    render(payload);
+  };
+  reader.readAsText(file);
+});
+
+function render(data){
+  const { sistema, hostname, usuario, data: dataLeitura, cpu, mem, disk } = data;
+  const assessment = buildAssessment(cpu, mem, disk);
+
+  const cpuClass = cpuResponseClass(cpu, mem, disk);
+  const memClass = memoryResponseClass(mem);
+  const diskClass = diskResponseClass(disk);
+
+  const components = [
+    { id:'cpu', label:'CPU', icon:'🧠', val:cpu, cls:cpuClass },
+    { id:'mem', label:'MEMÓRIA RAM', icon:'💾', val:mem, cls:memClass },
+    { id:'disk', label:'ARMAZENAMENTO', icon:'💿', val:disk, cls:diskClass }
+  ];
+
+  components.forEach((c, i) => {
+    const card = document.getElementById(`card-${c.id}`);
+    card.className = `kpi-card ${c.cls} loaded`;
+    card.innerHTML = `
+      <div class="kpi-top">
+        <span class="kpi-label">${c.label}</span>
+        <span class="kpi-icon">${c.icon}</span>
+      </div>
+      <div class="kpi-value">${c.val.toFixed(0)}%</div>
+      <div class="kpi-bar-wrap"><div class="kpi-bar" id="bar-${c.id}" style="width:0%"></div></div>
+      <div class="kpi-status">${usageStatusText(c.val)}</div>
+    `;
+    setTimeout(() => {
+      const bar = document.getElementById(`bar-${c.id}`);
+      if(bar) bar.style.width = `${Math.min(c.val, 100)}%`;
+    }, 200 + i * 120);
+  });
+
+  const infoCard = document.getElementById('card-info');
+  infoCard.className = 'kpi-card neutral loaded';
+  infoCard.innerHTML = `
+    <div class="kpi-top">
+      <span class="kpi-label">INFORMAÇÕES</span>
+      <span class="kpi-icon">🖥️</span>
+    </div>
+    <div class="info-list">
+      <div class="info-row">
+        <span class="info-key">Sistema</span>
+        <span class="info-val">${escapeHtml(sistema)}</span>
+      </div>
+      <div class="info-row">
+        <span class="info-key">Host</span>
+        <span class="info-val">${escapeHtml(hostname)}</span>
+      </div>
+      <div class="info-row">
+        <span class="info-key">Usuário</span>
+        <span class="info-val">${escapeHtml(usuario)}</span>
+      </div>
+      <div class="info-row">
+        <span class="info-key">Data</span>
+        <span class="info-val">${escapeHtml(dataLeitura)}</span>
+      </div>
+    </div>
+  `;
+
+  document.getElementById('scoreBanner').classList.add('visible');
+  document.getElementById('bottomGrid').classList.add('visible');
+
+  document.getElementById('scoreTitle').textContent = assessment.title;
+  document.getElementById('scoreTitle').style.color = colorFor(assessment.level);
+  document.getElementById('scoreSub').textContent = assessment.summary;
+  document.getElementById('ringVal').textContent = `${assessment.health.toFixed(0)}%`;
+  document.getElementById('ringVal').style.color = colorFor(assessment.level);
+
+  if (ringInstance) ringInstance.destroy();
+  ringInstance = new Chart(document.getElementById('ringChart'), {
+    type:'doughnut',
+    data:{
+      datasets:[{
+        data:[assessment.health, 100 - assessment.health],
+        backgroundColor:[colorFor(assessment.level), 'rgba(13,33,55,0.6)'],
+        borderWidth:0
+      }]
+    },
+    options:{
+      cutout:'76%',
+      plugins:{ legend:{ display:false }, tooltip:{ enabled:false } },
+      animation:{ duration:1200, easing:'easeInOutQuart' }
+    }
+  });
+
+  const quickInsights = document.getElementById('quickInsights');
+  quickInsights.innerHTML = '';
+  assessment.quick.forEach(item => {
+    const el = document.createElement('div');
+    el.className = 'insight-item';
+    el.innerHTML = `<div class="insight-dot" style="background:${colorFor(item.type)}"></div><span>${item.text}</span>`;
+    quickInsights.appendChild(el);
+  });
+
+  if (radarInstance) radarInstance.destroy();
+  radarInstance = new Chart(document.getElementById('radarChart'), {
+    type:'radar',
+    data:{
+      labels:['CPU','RAM','Disco'],
+      datasets:[{
+        label:'Uso (%)',
+        data:[cpu, mem, disk],
+        backgroundColor:'rgba(0,212,255,0.08)',
+        borderColor:'rgba(0,212,255,0.8)',
+        pointBackgroundColor:'#00d4ff',
+        pointRadius:4,
+        borderWidth:1.5
+      }]
+    },
+    options:{
+      plugins:{ legend:{ display:false } },
+      scales:{
+        r:{
+          min:0,
+          max:100,
+          ticks:{
+            stepSize:20,
+            color:'#3a5a72',
+            backdropColor:'transparent',
+            font:{ family:'Share Tech Mono', size:9 }
+          },
+          grid:{ color:'rgba(0,212,255,0.08)' },
+          pointLabels:{ color:'#c8e0f0', font:{ family:'Rajdhani', size:13, weight:'600' } },
+          angleLines:{ color:'rgba(0,212,255,0.08)' }
+        }
+      }
+    }
+  });
+
+  const breakdown = document.getElementById('breakdownList');
+  breakdown.innerHTML = '';
+  [
+    { id:'cpu', label:'CPU', val:cpu, cls:cpuClass },
+    { id:'mem', label:'MEMÓRIA RAM', val:mem, cls:memClass },
+    { id:'disk', label:'ARMAZENAMENTO', val:disk, cls:diskClass },
+    { id:'health', label:'SAÚDE ESTIMADA', val:assessment.health, cls:assessment.level }
+  ].forEach(item => {
+    const col = colorFor(item.cls);
+    breakdown.innerHTML += `
+      <div class="breakdown-item">
+        <div class="breakdown-top">
+          <span class="breakdown-name">${item.label}</span>
+          <span class="breakdown-val" style="color:${col}">${item.val.toFixed(0)}%</span>
+        </div>
+        <div class="breakdown-track">
+          <div class="breakdown-fill" id="bf-${item.id}" style="background:${col};width:0%"></div>
+        </div>
+      </div>
+    `;
+  });
+
+  setTimeout(() => {
+    [
+      { id:'cpu', val:cpu },
+      { id:'mem', val:mem },
+      { id:'disk', val:disk },
+      { id:'health', val:assessment.health }
+    ].forEach(item => {
+      const el = document.getElementById(`bf-${item.id}`);
+      if (el) el.style.width = `${Math.min(item.val, 100)}%`;
+    });
+  }, 300);
+
+  const insightsList = document.getElementById('insightsList');
+  insightsList.innerHTML = '';
+  assessment.insights.forEach(i => {
+    insightsList.innerHTML += `
+      <div class="insight-row ${i.type}">
+        <span class="tag">${i.tag}</span>
+        <span>${i.text}</span>
+      </div>
+    `;
+  });
+
+  document.getElementById('ft-status').textContent =
+    `ANÁLISE CONCLUÍDA · ${hostname} · ${usuario} · ${new Date().toLocaleTimeString('pt-BR')}`;
+}
+</script>
+</body>
+</html>
